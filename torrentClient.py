@@ -3,19 +3,38 @@ import os
 import requests
 
 class Client:
-    def __init__(self, torrentFile):
-        self.torrentFile = torrentFile
+    def __init__(self):
         self.peer_id = self.getNewPeerId()
 
     def getNewPeerId(self):
         return os.urandom(20)
 
-    def startDownload(self):
+    def download(self, torrentFilePath):
+        torrentFile = TorrentFile(torrentFilePath)
+        announceUrl = torrentFile.getAnnounceUrl()
         self.peer_id = self.getNewPeerId()
-        announceUrl = self.torrentFile.getAnnounceUrl()
         tracker = Tracker(announceUrl, self.peer_id, 6881)
-        res = tracker.get(self.torrentFile.getPiece(0))
-        return res.text
+        res = tracker.get(torrentFile.getPiece(0))
+        peerIp = self.getPeerIp(res)
+        peerPort = self.getPeerPort(res)
+        print(peerIp)
+        print(peerPort)
+        return res
+
+    def getPeerIp(self, trackerResponse):
+        ipInBytes = trackerResponse[b'peers'][0:4]
+        ip = ''
+        for byte in ipInBytes:
+            ip += str(byte)
+            ip += '.'
+        ip = ip[:-1]
+        return ip
+
+    def getPeerPort(self, trackerResponse):
+        portInBytes = trackerResponse[b'peers'][4:]
+        port = (portInBytes[0] << 8 | portInBytes[1])
+        return port
+
 
 class Tracker:
     def __init__(self,announce_url, peer_id, port_number):
@@ -31,19 +50,20 @@ class Tracker:
             'uploaded': 0,
             'downloaded':0
         }
-        res = requests.get(self.announce_url, reqData)
-        return res
+        res = requests.get(self.announce_url, reqData )
+        return bencodepy.decode(res.content)
+
+
 
 
 class TorrentFile:
     def __init__(self, filePath):
         decodedTorrentFile = bencodepy.bread(filePath)
 
-        if(len(decodedTorrentFile[b'info'][b'pieces'])%20)!=0:
-            raise ValueError('Pieces not divisible by 20')
-
         self.announceURL = decodedTorrentFile[b'announce'].decode()
         self.pieces = decodedTorrentFile[b'info'][b'pieces']
+        if(len(self.pieces) % 20) != 0:
+            raise ValueError('Pieces not divisible by 20')
 
     def getAnnounceUrl(self):
         return self.announceURL
@@ -59,7 +79,6 @@ class TorrentFile:
         return len(self.pieces)
 
 if __name__ == "__main__":
-    torrentFile = TorrentFile('./fanimatrix.torrent')
-    client = Client(torrentFile)
-    res = client.startDownload()
+    client = Client()
+    res = client.download('./fanimatrix.torrent')
     print(res)
