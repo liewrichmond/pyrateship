@@ -24,14 +24,13 @@ class Client:
 
         availablePeers = self.getAvailablePeers(res)
         for peer in availablePeers:
-            try:
-                connectedPeer =  await self.connect(peer)
-                print("connected")
-                break
-            except ConnectionRefusedError:
-                pass
-
-        await connectedPeer.initHandshake(torrentFile.getInfoHash(), self.peer_id)
+            async with AsyncPeer(peer) as p:
+                try:
+                    await self.shakeHands(p,torrentFile.getInfoHash(), self.peer_id)
+                    print("connected")
+                    break
+                except ConnectionRefusedError:
+                    pass
 
         return res
 
@@ -60,16 +59,12 @@ class Client:
         port = (portInBytes[0] << 8 | portInBytes[1])
         return port
 
-    async def connect(self, address):
+    async def shakeHands(self, peer, info_hash, peer_id):
         try:
-            #p = Peer(address)
-            p = AsyncPeer(address)
-            await p.connect()
-            return p
+            await peer.connect()
+            await peer.initHandshake(info_hash, peer_id)
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
-
-
 
 if __name__ == "__main__":
     client = Client()
