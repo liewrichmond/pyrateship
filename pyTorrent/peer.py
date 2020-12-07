@@ -1,6 +1,8 @@
 import asyncio
 import socket
 
+class ProtocolError(BaseException):
+    pass
 
 class AsyncPeer:
     def __init__(self, address):
@@ -28,45 +30,47 @@ class AsyncPeer:
 
     async def initHandshake(self, info_hash, peer_id):
         if self.writer is None or self.reader is None:
-            raise ConnectionRefusedError("Cannot connect to peer!")
+            raise ProtocolError("Can't shake hands before connecting to a peer!")
 
-        print("Shaking Hands...")
-        message_length = 68
-
-        self.writer.write(self._encodeHandshake(info_hash, peer_id))
+        handshake = Handshake(info_hash, peer_id)
+        self.writer.write(handshake.encode())
         await self.writer.drain()
 
-        handshake_reply = b''
+        reply = b''
         tries = 0
-        while tries < 10 and len(handshake_reply) < message_length:
-            handshake_reply = await self.reader.read(message_length)
+        while tries < 10 and len(reply) < handshake.MESSAGE_LENGTH:
+            reply = await self.reader.read(handshake.MESSAGE_LENGTH)
             tries+=1
 
-        if handshake_reply == b'' or handshake_reply is None:
-            print("Handshake Refused!")
+        if reply == b'' or reply is None:
             raise ConnectionRefusedError("Could Not Complete Handshake")
         else:
-            decoded_reply = self._decodeHandshake(handshake_reply)
+            decoded_reply = handshake.decode(reply)
             if decoded_reply['info_hash'] != info_hash:
                 raise ValueError('Invalid replied info hash!')
-            return handshake_reply
+            return decoded_reply
 
-    def _encodeHandshake(self, info_hash, peer_id):
+class Handshake:
+    MESSAGE_LENGTH = 68
+    def __init__(self, info_hash, peer_id):
+        self.info_hash = info_hash
+        self.peer_id = peer_id
+
+    def encode(self):
         prefix = b'\x13BitTorrent protocol'
         reserved = b'\x00\x00\x00\x00\x00\x00\x00\x00'
-        peer_id_bytes = bytes(peer_id, 'utf-8')
-        handshake_message = prefix + reserved + info_hash + peer_id_bytes
-        return handshake_message
+        peer_id_bytes = bytes(self.peer_id, 'utf-8')
+        encoded = prefix + reserved + self.info_hash + peer_id_bytes
+        return encoded
 
-    def _decodeHandshake(self, handshake_reply):
-        if len(handshake_reply) < 68:
+    def decode(self, reply):
+        if len(reply) < self.MESSAGE_LENGTH:
             raise ValueError("Invalid Reply!")
         else:
             decoded_reply = {}
-            decoded_reply['info_hash'] = handshake_reply[28:48]
-            decoded_reply['peer_id'] = handshake_reply[48:]
+            decoded_reply['info_hash'] = reply[28:48]
+            decoded_reply['peer_id'] = reply[48:]
             return decoded_reply
-
 
 
 # Rewrite using asyncio?

@@ -8,6 +8,7 @@ from peer import Peer, AsyncPeer
 class Client:
     def __init__(self):
         self.peer_id = self.getNewPeerId()
+        self.torrentFile = None
 
     def getNewPeerId(self):
         prefix = "-TR3000-"
@@ -15,29 +16,27 @@ class Client:
         return peerId
 
     async def download(self, torrentFilePath):
-        torrentFile = TorrentFile(torrentFilePath)
-        announceUrl = torrentFile.getAnnounceUrl()
-        self.peer_id = self.getNewPeerId()
+        self.torrentFile = TorrentFile(torrentFilePath)
+        announceUrl = self.torrentFile.getAnnounceUrl()
 
         tracker = Tracker(announceUrl, self.peer_id, 6881)
-        res = tracker.getResponse(torrentFile.getInfoHash())
+        availablePeers = self.getAvailablePeers(tracker)
 
-        availablePeers = self.getAvailablePeers(res)
         for peer in availablePeers:
             async with AsyncPeer(peer) as p:
                 try:
-                    await self.shakeHands(p,torrentFile.getInfoHash(), self.peer_id)
-                    print("connected")
+                    await self.shakeHands(p)
                     break
                 except ConnectionRefusedError:
                     pass
 
         return res
 
-    def getAvailablePeers(self, trackerResponse):
+    def getAvailablePeers(self, tracker):
+        res = tracker.getResponse(self.torrentFile.getInfoHash())
         try:
             availablePeers = []
-            peers = trackerResponse[b'peers']
+            peers = res[b'peers']
             for i in range(0,len(peers),6):
                 peerIp = self.parsePeerIp(peers[i:i+4])
                 peerPort = self.parsePeerPort(peers[i+4:])
@@ -59,10 +58,10 @@ class Client:
         port = (portInBytes[0] << 8 | portInBytes[1])
         return port
 
-    async def shakeHands(self, peer, info_hash, peer_id):
+    async def shakeHands(self, peer):
         try:
             await peer.connect()
-            await peer.initHandshake(info_hash, peer_id)
+            await peer.initHandshake(self.torrentFile.getInfoHash(), self.peer_id)
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
 
