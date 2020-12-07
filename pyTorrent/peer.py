@@ -28,27 +28,46 @@ class AsyncPeer:
             print("Connection Timed Out!")
             raise ConnectionRefusedError("Connection Timed Out")
 
-    async def initHandshake(self, info_hash, peer_id):
+    async def initiateHandshake(self, info_hash, peer_id):
         if self.writer is None or self.reader is None:
             raise ProtocolError("Can't shake hands before connecting to a peer!")
 
         handshake = Handshake(info_hash, peer_id)
-        self.writer.write(handshake.encode())
-        await self.writer.drain()
 
+        await self.sendInitialHandshake(handshake)
+        raw_reply = await self.waitForHandshakeReply()
+
+        decoded_reply = handshake.decode(raw_reply)
+        if(self.hashesMatch(decoded_reply, info_hash)):
+            return decoded_reply
+
+    async def sendInitialHandshake(self, handshake):
+        if self.writer is not None:
+            self.writer.write(handshake.encode())
+            await self.writer.drain()
+
+    async def waitForHandshakeReply(self):
         reply = b''
         tries = 0
-        while tries < 10 and len(reply) < handshake.MESSAGE_LENGTH:
-            reply = await self.reader.read(handshake.MESSAGE_LENGTH)
+        while tries < 10 and len(reply) < Handshake.MESSAGE_LENGTH:
+            reply = await self.reader.read(Handshake.MESSAGE_LENGTH)
             tries+=1
 
-        if reply == b'' or reply is None:
-            raise ConnectionRefusedError("Could Not Complete Handshake")
+        if reply != b'' and reply is not None:
+            return reply
         else:
-            decoded_reply = handshake.decode(reply)
-            if decoded_reply['info_hash'] != info_hash:
-                raise ValueError('Invalid replied info hash!')
-            return decoded_reply
+            raise ConnectionRefusedError("Could Not Complete Handshake")
+
+    def hashesMatch(self, decoded_reply, expectedHash):
+        try:
+            if(decoded_reply['info_hash'] == expectedHash):
+                return True
+            else:
+                return False
+        except KeyError:
+            raise ValueError("Reply is missing the info_hash key")
+
+
 
 class Handshake:
     MESSAGE_LENGTH = 68

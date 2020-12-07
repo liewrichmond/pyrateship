@@ -17,20 +17,21 @@ class Client:
 
     async def download(self, torrentFilePath):
         self.torrentFile = TorrentFile(torrentFilePath)
-        announceUrl = self.torrentFile.getAnnounceUrl()
 
-        tracker = Tracker(announceUrl, self.peer_id, 6881)
-        availablePeers = self.getAvailablePeers(tracker)
+        tracker = Tracker(self.torrentFile.getAnnounceUrl(), self.peer_id, 6881)
+        available_peers = self.getAvailablePeers(tracker)
 
-        for peer in availablePeers:
-            async with AsyncPeer(peer) as p:
-                try:
-                    await self.shakeHands(p)
-                    break
-                except ConnectionRefusedError:
-                    pass
+        await self.connectToPeers(available_peers)
 
-        return res
+    async def connectToPeers(self,availablePeers):
+        if len(availablePeers) > 0:
+            for peer in availablePeers:
+                async with AsyncPeer(peer) as p:
+                    try:
+                        await self.shakeHands(p)
+                        break
+                    except ConnectionRefusedError:
+                        pass
 
     def getAvailablePeers(self, tracker):
         res = tracker.getResponse(self.torrentFile.getInfoHash())
@@ -61,7 +62,7 @@ class Client:
     async def shakeHands(self, peer):
         try:
             await peer.connect()
-            await peer.initHandshake(self.torrentFile.getInfoHash(), self.peer_id)
+            await peer.initiateHandshake(self.torrentFile.getInfoHash(), self.peer_id)
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
 
