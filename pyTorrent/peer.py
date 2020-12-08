@@ -75,12 +75,23 @@ class Handshake:
         self.info_hash = info_hash
         self.peer_id = peer_id
 
+    def encode_prefix(self):
+        return b'\x13BitTorrent protocol'
+
+    def encode_reserved_bytes(self):
+        return b'\x00\x00\x00\x00\x00\x00\x00\x00'
+
+    def encode_peer_id(self):
+        return bytes(self.peer_id, 'utf-8')
+
     def encode(self):
-        prefix = b'\x13BitTorrent protocol'
-        reserved = b'\x00\x00\x00\x00\x00\x00\x00\x00'
-        peer_id_bytes = bytes(self.peer_id, 'utf-8')
-        encoded = prefix + reserved + self.info_hash + peer_id_bytes
-        return encoded
+        encoded_message = (
+                            self.encode_prefix() +
+                            self.encode_reserved_bytes() +
+                            self.info_hash +
+                            self.encode_peer_id()
+                           )
+        return encoded_message
 
     def decode(self, reply):
         if len(reply) < self.MESSAGE_LENGTH:
