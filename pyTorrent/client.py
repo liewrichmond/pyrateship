@@ -3,7 +3,7 @@ import socket
 import asyncio
 from torrentFile import TorrentFile
 from tracker import Tracker
-from peer import Peer, AsyncPeer
+from peer import Peer
 
 class Client:
     def __init__(self):
@@ -15,20 +15,21 @@ class Client:
         peerId = prefix + os.urandom(6).hex()
         return peerId
 
+    def getTracker(self, announceUrl):
+        return Tracker(announceUrl, self.peer_id, 6881)
+
     async def download(self, torrentFilePath):
         self.torrentFile = TorrentFile(torrentFilePath)
-
-        tracker = Tracker(self.torrentFile.getAnnounceUrl(), self.peer_id, 6881)
+        tracker = self.getTracker(self.torrentFile.announce_url)
         available_peers = self.getAvailablePeers(tracker)
-
         await self.connectToPeers(available_peers)
 
     async def connectToPeers(self,availablePeers):
         if len(availablePeers) > 0:
             for peer in availablePeers:
-                async with AsyncPeer(peer) as p:
+                async with Peer(peer) as p:
                     try:
-                        await self.shakeHands(p)
+                        await self.create_torrent_connection(p)
                         break
                     except ConnectionRefusedError:
                         pass
@@ -59,10 +60,11 @@ class Client:
         port = (portInBytes[0] << 8 | portInBytes[1])
         return port
 
-    async def shakeHands(self, peer):
+    async def create_torrent_connection(self, peer):
         try:
-            await peer.connect()
+            await peer.create_tcp_connection()
             await peer.initiateHandshake(self.torrentFile.getInfoHash(), self.peer_id)
+            await peer.getBitField()
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
 

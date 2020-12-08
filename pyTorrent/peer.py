@@ -1,10 +1,11 @@
 import asyncio
 import socket
+import struct
 
 class ProtocolError(BaseException):
     pass
 
-class AsyncPeer:
+class Peer:
     def __init__(self, address):
         self.ip = address[0]
         self.port = address[1]
@@ -19,7 +20,21 @@ class AsyncPeer:
             self.writer.close()
             await self.writer.wait_closed()
 
-    async def connect(self):
+    def is_connected(self):
+        if self.writer is None or self.reader is None:
+            return False
+        else:
+            return True
+
+    async def read_from_buffer(self, expected_length):
+        if(self.is_connected()):
+            reply = b''
+            while len(reply) < expected_length:
+                readsize = expected_length- len(reply)
+                reply += await self.reader.read(readsize)
+            return reply
+
+    async def create_tcp_connection(self):
         fut = asyncio.open_connection(self.ip, self.port)
         try:
             self.reader, self.writer = await asyncio.wait_for(fut, timeout=5)
@@ -29,17 +44,36 @@ class AsyncPeer:
             raise ConnectionRefusedError("Connection Timed Out")
 
     async def initiateHandshake(self, info_hash, peer_id):
-        if self.writer is None or self.reader is None:
-            raise ProtocolError("Can't shake hands before connecting to a peer!")
+        if(self.is_connected()):
+            handshake = Handshake(info_hash, peer_id)
 
-        handshake = Handshake(info_hash, peer_id)
+            await self.sendInitialHandshake(handshake)
+            raw_reply = await self.waitForHandshakeReply()
+            decoded_reply = handshake.decode(raw_reply)
 
-        await self.sendInitialHandshake(handshake)
-        raw_reply = await self.waitForHandshakeReply()
+            if(self.hashesMatch(decoded_reply, info_hash)):
+                return decoded_reply
 
-        decoded_reply = handshake.decode(raw_reply)
-        if(self.hashesMatch(decoded_reply, info_hash)):
-            return decoded_reply
+    async def getBitField(self):
+        if(self.is_connected()):
+            message_length= await self.getMessageLength()
+            bitField = await self.read_from_buffer(message_length)
+            await self.expressInterest()
+
+    async def expressInterest(self):
+        if(self.is_connected()):
+            interested_message = struct.pack(
+                '>IB',
+                1,
+                2
+            )
+            self.writer.write(interested_message)
+            await self.writer.drain()
+
+    async def getMessageLength(self):
+        length_prefix_size = 4
+        length_prefix = await self.read_from_buffer(length_prefix_size)
+        return int.from_bytes(length_prefix, byteorder='big')
 
     async def sendInitialHandshake(self, handshake):
         if self.writer is not None:
@@ -48,7 +82,7 @@ class AsyncPeer:
 
     async def waitForHandshakeReply(self):
         reply = b''
-        tries = 0
+        tries = 1
         while tries < 10 and len(reply) < Handshake.MESSAGE_LENGTH:
             reply = await self.reader.read(Handshake.MESSAGE_LENGTH)
             tries+=1
@@ -66,6 +100,11 @@ class AsyncPeer:
                 return False
         except KeyError:
             raise ValueError("Reply is missing the info_hash key")
+
+
+class Message:
+    def __init__(self):
+
 
 
 
@@ -101,31 +140,3 @@ class Handshake:
             decoded_reply['info_hash'] = reply[28:48]
             decoded_reply['peer_id'] = reply[48:]
             return decoded_reply
-
-
-# Rewrite using asyncio?
-class Peer:
-    def __init__(self, address):
-        self.address = address
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.settimeout(5)
-
-    def connect(self):
-        try:
-            self.sock.connect(self.address)
-        except socket.timeout:
-            raise ConnectionRefusedError("Timeout")
-
-    def initHandshake(self, info_hash, peer_id):
-        prefix = b'\x13BitTorrent protocol'
-        reserved = b'\x00\x00\x00\x00\x00\x00\x00\x00'
-        info_hash_bytes = info_hash
-        peer_id_bytes = bytes(peer_id, 'utf-8')
-        handshake_message = prefix + reserved+ info_hash_bytes + peer_id_bytes
-
-        totalSent = 0
-        while totalSent < len(handshake_message):
-            sent = self.sock.send(handshake_message[totalSent:])
-            if sent == 0:
-                raise RuntimeError("Socket connection broken")
-            totalSent += totalSent + sent
