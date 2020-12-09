@@ -9,6 +9,7 @@ class TorrentFile:
         self.info_hash = hashlib.sha1(encodedInfoDict)
         self.announce_url = decodedTorrentFile[b'announce'].decode()
         self.pieces = decodedTorrentFile[b'info'][b'pieces']
+        self.nPieces = len(self.pieces)//20
 
         if(len(self.pieces) % 20) != 0:
             raise ValueError('Pieces not divisible by 20')
@@ -19,9 +20,6 @@ class TorrentFile:
         endIndex = startIndex + 20
 
         return self.pieces[startIndex:endIndex]
-
-    def getNPieces(self):
-        return len(self.pieces)
 
     def getInfoHash(self):
         return(self.info_hash.digest())

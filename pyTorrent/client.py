@@ -22,17 +22,29 @@ class Client:
         self.torrentFile = TorrentFile(torrentFilePath)
         tracker = self.getTracker(self.torrentFile.announce_url)
         available_peers = self.getAvailablePeers(tracker)
-        await self.connectToPeers(available_peers)
+        connected_peers = await self.connectToPeers(available_peers)
+        await self.expressInterest(connected_peers)
 
-    async def connectToPeers(self,availablePeers):
+
+    async def connectToPeers(self, availablePeers):
         if len(availablePeers) > 0:
-            for peer in availablePeers:
-                async with Peer(peer) as p:
-                    try:
-                        await self.create_torrent_connection(p)
+            connectedPeers = []
+            for p in availablePeers:
+                peer = Peer(p)
+                try:
+                    await self.create_torrent_connection(peer)
+                    connectedPeers.append(peer)
+                    if(len(connectedPeers) == 4) :
                         break
-                    except ConnectionRefusedError:
-                        pass
+                except ConnectionRefusedError:
+                    print("closing connection...")
+                    await peer.close_tcp_connection()
+                    pass
+            return connectedPeers
+
+    async def expressInterest(self, connectedPeers):
+        for peer in connectedPeers:
+            await peer.expressInterest()
 
     def getAvailablePeers(self, tracker):
         res = tracker.getResponse(self.torrentFile.getInfoHash())
@@ -60,11 +72,17 @@ class Client:
         port = (portInBytes[0] << 8 | portInBytes[1])
         return port
 
+    def checkBitField(self, bit_field):
+        if(len(bit_field)*8 == self.torrentFile.nPieces or (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
+            pass
+        else:
+            raise ConnectionRefusedError("Invalid BitField Length")
+
     async def create_torrent_connection(self, peer):
         try:
             await peer.create_tcp_connection()
             await peer.initiateHandshake(self.torrentFile.getInfoHash(), self.peer_id)
-            await peer.getBitField()
+            self.checkBitField(await peer.getBitField())
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
 

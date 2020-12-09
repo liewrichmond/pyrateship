@@ -11,6 +11,8 @@ class Peer:
         self.port = address[1]
         self.reader = None
         self.writer = None
+        self.choking = True
+        self.interested = False
 
     async def __aenter__(self):
         return self
@@ -38,10 +40,15 @@ class Peer:
         fut = asyncio.open_connection(self.ip, self.port)
         try:
             self.reader, self.writer = await asyncio.wait_for(fut, timeout=5)
-            print("Connected To Peer!")
+            print("TCP Connected Created... ")
         except asyncio.TimeoutError:
             print("Connection Timed Out!")
             raise ConnectionRefusedError("Connection Timed Out")
+
+    async def close_tcp_connection(self):
+        if self.writer is not None:
+            self.writer.close()
+            await self.writer.wait_closed()
 
     async def initiateHandshake(self, info_hash, peer_id):
         if(self.is_connected()):
@@ -58,7 +65,8 @@ class Peer:
         if(self.is_connected()):
             message_length= await self.getMessageLength()
             bitField = await self.read_from_buffer(message_length)
-            await self.expressInterest()
+            return bitField[1:]
+            #await self.expressInterest()
 
     async def expressInterest(self):
         if(self.is_connected()):
@@ -69,6 +77,18 @@ class Peer:
             )
             self.writer.write(interested_message)
             await self.writer.drain()
+            self.interested = True
+
+        else:
+            raise ProtocolError("nah")
+
+    async def waitForUnchocked(self):
+        message = await self.getMessage()
+
+    async def getMessage(self):
+        message_length = await self.getMessageLength()
+        message = await self.read_from_buffer(message_length)
+        return message
 
     async def getMessageLength(self):
         length_prefix_size = 4
@@ -102,8 +122,9 @@ class Peer:
             raise ValueError("Reply is missing the info_hash key")
 
 
-class Message:
-    def __init__(self):
+#class Message:
+#    def __init__(self, kind, payload):
+#        self.type =
 
 
 
