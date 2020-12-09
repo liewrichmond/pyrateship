@@ -14,8 +14,7 @@ class TorrentFile:
         if(len(self.pieces) % 20) != 0:
             raise ValueError('Pieces not divisible by 20')
 
-    def getPiece(self, pieceIndex):
-
+    def getPieceHash(self, pieceIndex):
         startIndex = pieceIndex * 20
         endIndex = startIndex + 20
 

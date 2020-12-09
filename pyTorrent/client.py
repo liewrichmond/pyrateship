@@ -9,21 +9,28 @@ class Client:
     def __init__(self):
         self.peer_id = self.getNewPeerId()
         self.torrentFile = None
+        self.queue = None
 
     def getNewPeerId(self):
         prefix = "-TR3000-"
         peerId = prefix + os.urandom(6).hex()
         return peerId
 
-    def getTracker(self, announceUrl):
-        return Tracker(announceUrl, self.peer_id, 6881)
-
     async def download(self, torrentFilePath):
         self.torrentFile = TorrentFile(torrentFilePath)
-        tracker = self.getTracker(self.torrentFile.announce_url)
-        available_peers = self.getAvailablePeers(tracker)
+        self.generateDownloadQueue()
+        available_peers = self.getAvailablePeers(Tracker(self.torrentFile.announce_url, self.peer_id, 6881))
         connected_peers = await self.connectToPeers(available_peers)
         await self.expressInterest(connected_peers)
+
+    def generateDownloadQueue(self):
+        self.queue = [False] * self.torrentFile.nPieces
+
+    def startRequests(self, connected_peers):
+        for peer in connected_peers:
+            if peer.isChoked():
+                #If peer is choked, don't bother asking for a piece; just move on
+                pass
 
 
     async def connectToPeers(self, availablePeers):
@@ -73,7 +80,8 @@ class Client:
         return port
 
     def checkBitField(self, bit_field):
-        if(len(bit_field)*8 == self.torrentFile.nPieces or (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
+        if(len(bit_field)*8 == self.torrentFile.nPieces or
+           (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
             pass
         else:
             raise ConnectionRefusedError("Invalid BitField Length")

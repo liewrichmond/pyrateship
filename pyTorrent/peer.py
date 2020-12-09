@@ -13,6 +13,7 @@ class Peer:
         self.writer = None
         self.choking = True
         self.interested = False
+        self.available_pieces = None
 
     async def __aenter__(self):
         return self
@@ -64,9 +65,21 @@ class Peer:
     async def getBitField(self):
         if(self.is_connected()):
             message_length= await self.getMessageLength()
-            bitField = await self.read_from_buffer(message_length)
-            return bitField[1:]
-            #await self.expressInterest()
+            payload = await self.read_from_buffer(message_length)
+            bit_field = payload[1:]
+            self.setAvailablePieces(bit_field)
+            return bit_field
+
+    def setAvailablePieces(self, bit_field):
+        if(self.available_pieces is None):
+            self.available_pieces = [0] * (len(bit_field)*8)
+            for i in range(0, len(bit_field)):
+                for j in range(0, 8):
+                    piece_index = (i*8) + j
+                    shift_amnt = 7 - j
+                    mask = 1 << shift_amnt
+                    bit_field_val = True if bit_field[i] & mask > 0 else False
+                    self.available_pieces[piece_index] = bit_field_val
 
     async def expressInterest(self):
         if(self.is_connected()):
@@ -83,6 +96,8 @@ class Peer:
             raise ProtocolError("nah")
 
     async def waitForUnchocked(self):
+        if(self.choking):
+            #Keep reading from buffer until unchoked.
         message = await self.getMessage()
 
     async def getMessage(self):
@@ -145,6 +160,7 @@ class Handshake:
         return bytes(self.peer_id, 'utf-8')
 
     def encode(self):
+        #might want to use structs here
         encoded_message = (
                             self.encode_prefix() +
                             self.encode_reserved_bytes() +
