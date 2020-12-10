@@ -28,10 +28,11 @@ class Client:
 
     def startRequests(self, connected_peers):
         for peer in connected_peers:
-            if peer.isChoked():
+            if not peer.isChoked():
+                self.requestPiece(index, peer)
+            else:
                 #If peer is choked, don't bother asking for a piece; just move on
                 pass
-
 
     async def connectToPeers(self, availablePeers):
         if len(availablePeers) > 0:

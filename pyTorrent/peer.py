@@ -64,11 +64,10 @@ class Peer:
 
     async def getBitField(self):
         if(self.is_connected()):
-            message_length= await self.getMessageLength()
-            payload = await self.read_from_buffer(message_length)
-            bit_field = payload[1:]
-            self.setAvailablePieces(bit_field)
-            return bit_field
+            message = await self.getMessage()
+            if(type(message) is BitField):
+                self.setAvailablePieces(message.bit_field)
+                return message.bit_field
 
     def setAvailablePieces(self, bit_field):
         if(self.available_pieces is None):
@@ -95,15 +94,20 @@ class Peer:
         else:
             raise ProtocolError("nah")
 
-    async def waitForUnchocked(self):
+    async def isChoked(self):
         if(self.choking):
-            #Keep reading from buffer until unchoked.
-        message = await self.getMessage()
+            message = await self.getMessage()
+            if(type(message) == Unchoke):
+                return False
+            else:
+                return True
+        else:
+            return False
 
     async def getMessage(self):
         message_length = await self.getMessageLength()
-        message = await self.read_from_buffer(message_length)
-        return message
+        raw_bytes = await self.read_from_buffer(message_length)
+        return Message.factory(raw_bytes)
 
     async def getMessageLength(self):
         length_prefix_size = 4
@@ -121,7 +125,6 @@ class Peer:
         while tries < 10 and len(reply) < Handshake.MESSAGE_LENGTH:
             reply = await self.reader.read(Handshake.MESSAGE_LENGTH)
             tries+=1
-
         if reply != b'' and reply is not None:
             return reply
         else:
@@ -137,12 +140,64 @@ class Peer:
             raise ValueError("Reply is missing the info_hash key")
 
 
-#class Message:
-#    def __init__(self, kind, payload):
-#        self.type =
+class Message:
+    Choke = 0
+    Unchoke = 1
+    Interested = 2
+    NotInterested = 3
+    Have = 4
+    BitField = 5
+    Request = 6
+    Piece = 7
+    Cancel = 8
 
+    def __init__(self, payload):
+        self.payload = payload
 
+    @classmethod
+    def factory(self, raw_bytes):
+        message_type = raw_bytes[0]
+        if(self.hasPayload(message_type)):
+            message_payload = raw_bytes[1:]
+            if message_type == self.Have:
+                return Have(message_payload)
+            elif message_type == self.BitField:
+                return BitField(message_payload)
+            elif message_type == self.Request:
+                return Request(message_payload)
+            elif message_type == self.Piece:
+                return Piece(message_payload)
+            elif message_type == self.Cancel:
+                return Cancel(message_payload)
+            else:
+                raise ValueError("Invalid Message Type")
+        else:
+            if message_type == self.Choke:
+                return Choke(None)
+            elif message_type == self.Unchoke:
+                return Unchoke(None)
+            elif message_type == self.Interested:
+                return Interested(None)
+            elif message_type == self.NotInterested:
+                return NotInterested(None)
+            else: raise ValueError("Invalid Message Type")
 
+    @classmethod
+    def hasPayload(cls, message_type):
+        if message_type == 4 or message_type == 5 or message_type == 6 or message_type == 7 or message_type == 8:
+            return True
+        else:
+            return False
+
+class BitField(Message):
+    def __init__(self, message_payload):
+        self.bit_field = message_payload
+    def __str__(self):
+        return "BitField"
+
+class Unchoke(Message):
+    def __str__(self):
+        return "Unchoke"
 
 class Handshake:
     MESSAGE_LENGTH = 68
