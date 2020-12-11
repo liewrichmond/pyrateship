@@ -29,6 +29,9 @@ class Peer:
         else:
             return True
 
+    def hasPiece(self, piece_index):
+        return self.available_pieces[piece_index]
+
     async def read_from_buffer(self, expected_length):
         if(self.is_connected()):
             reply = b''
@@ -98,11 +101,8 @@ class Peer:
         if(self.choking):
             message = await self.getMessage()
             if(type(message) == Unchoke):
-                return False
-            else:
-                return True
-        else:
-            return False
+                self.choking = False
+        return self.choking
 
     async def getMessage(self):
         message_length = await self.getMessageLength()
@@ -156,6 +156,8 @@ class Message:
 
     @classmethod
     def factory(self, raw_bytes):
+        if(len(raw_bytes) == 0):
+            raise ValueError("Empty message!")
         message_type = raw_bytes[0]
         if(self.hasPayload(message_type)):
             message_payload = raw_bytes[1:]

@@ -22,17 +22,29 @@ class Client:
         available_peers = self.getAvailablePeers(Tracker(self.torrentFile.announce_url, self.peer_id, 6881))
         connected_peers = await self.connectToPeers(available_peers)
         await self.expressInterest(connected_peers)
+        await self.startRequests(connected_peers)
 
     def generateDownloadQueue(self):
         self.queue = [False] * self.torrentFile.nPieces
 
-    def startRequests(self, connected_peers):
+    async def startRequests(self, connected_peers):
         for peer in connected_peers:
-            if not peer.isChoked():
-                self.requestPiece(index, peer)
+            peer_is_choked = await peer.isChoked()
+            if not peer_is_choked:
+                piece_index = 0
+                if peer.hasPiece(piece_index):
+                    await self.requestPiece(piece_index, peer)
+                else:
+                    pass
             else:
                 #If peer is choked, don't bother asking for a piece; just move on
                 pass
+
+    async def requestPiece(self, piece_index, peer):
+        for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
+            block_size = self.torrentFile.getBlockSize(piece_index, block_index)
+            begin = block_index * block_size
+            await self.send_message(peer, RequestMessage.encode())
 
     async def connectToPeers(self, availablePeers):
         if len(availablePeers) > 0:
@@ -55,7 +67,7 @@ class Client:
             await peer.expressInterest()
 
     def getAvailablePeers(self, tracker):
-        res = tracker.getResponse(self.torrentFile.getInfoHash())
+        res = tracker.getResponse(self.torrentFile.info_hash)
         try:
             availablePeers = []
             peers = res[b'peers']
@@ -90,7 +102,7 @@ class Client:
     async def create_torrent_connection(self, peer):
         try:
             await peer.create_tcp_connection()
-            await peer.initiateHandshake(self.torrentFile.getInfoHash(), self.peer_id)
+            await peer.initiateHandshake(self.torrentFile.info_hash, self.peer_id)
             self.checkBitField(await peer.getBitField())
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
