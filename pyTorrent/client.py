@@ -3,7 +3,7 @@ import socket
 import asyncio
 from torrentFile import TorrentFile
 from tracker import Tracker
-from peer import Peer
+from peer import Peer, Request
 
 class Client:
     def __init__(self):
@@ -34,6 +34,7 @@ class Client:
                 piece_index = 0
                 if peer.hasPiece(piece_index):
                     await self.requestPiece(piece_index, peer)
+                    await peer.getMessage()
                 else:
                     pass
             else:
@@ -43,8 +44,16 @@ class Client:
     async def requestPiece(self, piece_index, peer):
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
             block_size = self.torrentFile.getBlockSize(piece_index, block_index)
-            begin = block_index * block_size
-            await self.send_message(peer, RequestMessage.encode())
+            block_offset= block_index * self.torrentFile.DefaultBlockSize
+            request = Request(piece_index, block_offset, block_size)
+            await self.send_message(peer, request)
+
+    async def send_message(self, peer, request):
+        if(peer.is_connected()):
+            peer.writer.write(request.encode())
+            await peer.writer.drain()
+        else:
+            raise ValueError("Peer isn't connected")
 
     async def connectToPeers(self, availablePeers):
         if len(availablePeers) > 0:

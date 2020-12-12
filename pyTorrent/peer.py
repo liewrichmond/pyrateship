@@ -198,7 +198,20 @@ class BitField(Message):
         return "BitField"
 
 class Request(Message):
-    def __init__(self, piece_index, block_offset, block_length)
+    def __init__(self, piece_index, block_offset, block_length):
+        self.piece_index = piece_index
+        self.block_offset = block_offset
+        self.block_length = block_length
+
+    def encode(self):
+        return struct.pack(
+            '>IBIII',
+            13,
+            6,
+            self.piece_index,
+            self.block_offset,
+            self.block_length
+        )
 
 class Unchoke(Message):
     def __str__(self):

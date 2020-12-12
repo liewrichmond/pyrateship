@@ -2,7 +2,7 @@ import bencodepy
 import hashlib
 
 class TorrentFile:
-    DefaultBlockSize
+    DefaultBlockSize = pow(2,14)
     def __init__(self, filePath):
         decodedTorrentFile = bencodepy.bread(filePath)
         encodedInfoDict = bencodepy.encode(decodedTorrentFile[b'info'])
