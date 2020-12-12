@@ -197,6 +197,9 @@ class BitField(Message):
     def __str__(self):
         return "BitField"
 
+class Request(Message):
+    def __init__(self, piece_index, block_offset, block_length)
+
 class Unchoke(Message):
     def __str__(self):
         return "Unchoke"

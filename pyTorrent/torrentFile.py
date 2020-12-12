@@ -2,6 +2,7 @@ import bencodepy
 import hashlib
 
 class TorrentFile:
+    DefaultBlockSize
     def __init__(self, filePath):
         decodedTorrentFile = bencodepy.bread(filePath)
         encodedInfoDict = bencodepy.encode(decodedTorrentFile[b'info'])
@@ -31,6 +32,7 @@ class TorrentFile:
     def getFinalPieceLength(self):
         return ((self.file_length/self.piece_length - self.file_length//self.piece_length) * self.piece_length)
 
+    #create defaultblocksize const macro
     def getNBlocksFinalPiece(self):
         final_piece_length = self.getFinalPieceLength()
         n_blocks = (final_piece_length // pow(2,14)) + 1
