@@ -1,31 +1,20 @@
 import os
 import socket
 import asyncio
+import queue
 from torrentFile import TorrentFile
 from tracker import Tracker
 from peer import Peer, Request
 
 class Client:
     def __init__(self):
-        self.peer_id = self.getNewPeerId()
         self.torrentFile = None
         self.queue = None
 
-    def getNewPeerId(self):
-        prefix = "-TR3000-"
-        peerId = prefix + os.urandom(6).hex()
-        return peerId
-
     async def download(self, torrentFilePath):
         self.torrentFile = TorrentFile(torrentFilePath)
-        self.generateDownloadQueue()
-        available_peers = self.getAvailablePeers(Tracker(self.torrentFile.announce_url, self.peer_id, 6881))
-        connected_peers = await self.connectToPeers(available_peers)
-        await self.expressInterest(connected_peers)
-        await self.startRequests(connected_peers)
-
-    def generateDownloadQueue(self):
-        self.queue = [False] * self.torrentFile.nPieces
+        downloader = Downloader(self.torrentFile)
+        await downloader.download()
 
     async def startRequests(self, connected_peers):
         for peer in connected_peers:
@@ -75,39 +64,6 @@ class Client:
         for peer in connectedPeers:
             await peer.expressInterest()
 
-    def getAvailablePeers(self, tracker):
-        res = tracker.getResponse(self.torrentFile.info_hash)
-        try:
-            availablePeers = []
-            peers = res[b'peers']
-            for i in range(0,len(peers),6):
-                peerIp = self.parsePeerIp(peers[i:i+4])
-                peerPort = self.parsePeerPort(peers[i+4:])
-                peerEndpoint = (peerIp, peerPort)
-                availablePeers.append(peerEndpoint)
-            return availablePeers
-        except KeyError:
-            raise KeyError('Invalid Tracker Response')
-
-    def parsePeerIp(self, ipInBytes):
-        ip = ''
-        for byte in ipInBytes:
-            ip += str(byte)
-            ip += '.'
-        ip = ip[:-1]
-        return ip
-
-    def parsePeerPort(self, portInBytes):
-        port = (portInBytes[0] << 8 | portInBytes[1])
-        return port
-
-    def checkBitField(self, bit_field):
-        if(len(bit_field)*8 == self.torrentFile.nPieces or
-           (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
-            pass
-        else:
-            raise ConnectionRefusedError("Invalid BitField Length")
-
     async def create_torrent_connection(self, peer):
         try:
             await peer.create_tcp_connection()
@@ -115,6 +71,76 @@ class Client:
             self.checkBitField(await peer.getBitField())
         except ConnectionRefusedError:
             raise ConnectionRefusedError("Connection Refused")
+
+class Downloader:
+
+    @classmethod
+    def getNewPeerId(self):
+        prefix = "-TR3000-"
+        peerId = prefix + os.urandom(6).hex()
+        return peerId
+
+    def __init__(self, torrentFile):
+        self.torrentFile = torrentFile
+        self.downloadQueue = self.generateDownloadQueue()
+        self.workingQueue = queue.Queue()
+        self.available_peer_addresses = self.getAvailablePeers()
+        self.connected_peers = set()
+        self.peer_id = self.getNewPeerId()
+
+    def downloadComplete(self):
+        if(self.downloadQueue.empty() and self.workingQueue.empty()):
+            return True
+        else:
+            return False
+
+    def generateDownloadQueue(self):
+        download_queue = queue.Queue()
+        for i in range(0, self.torrentFile.nPieces):
+            download_queue.put(i)
+        return download_queue
+
+    def getAvailablePeers(self):
+        tracker = Tracker(self.torrentFile, self.getNewPeerId())
+        return tracker.getAvailablePeers()
+
+    def isValidBitField(self, bit_field):
+        if(len(bit_field)*8 == self.torrentFile.nPieces or
+           (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
+            return True
+        else:
+            return False
+
+    async def connectToPeers(self):
+        while len(self.available_peer_addresses) != 0:
+            peer_address = self.available_peer_addresses.pop()
+            peer = Peer(peer_address)
+            try:
+                await peer.create_tcp_connection()
+                await peer.startHandshake(self.torrentFile.info_hash, self.peer_id)
+                if self.isValidBitField(await peer.getBitField()):
+                    await peer.expressInterest()
+                    self.connected_peers.add(peer)
+            except ConnectionRefusedError:
+                await peer.close_tcp_connection()
+                pass
+
+    async def makeRequest(self, peer, piece_index):
+        self.workingQueue.put(pieceIndex)
+        for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
+            block_size = self.torrentFile.getBlockSize(piece_index, block_index)
+            block_offset= block_index * self.torrentFile.DefaultBlockSize
+            request = Request(piece_index, block_offset, block_size)
+            await peer.write(request.encode())
+
+    async def download(self):
+        asyncio.create_task(self.connectToPeers())
+        await asyncio.sleep(15)
+        while not self.downloadComplete():
+            peer = self.connected_peers.pop()
+            pieceIndex = self.downloadQueue.get()
+            asyncio.create_task(self.makeRequest(peer, pieceIndex))
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     client = Client()

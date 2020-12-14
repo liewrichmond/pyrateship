@@ -54,7 +54,7 @@ class Peer:
             self.writer.close()
             await self.writer.wait_closed()
 
-    async def initiateHandshake(self, info_hash, peer_id):
+    async def startHandshake(self, info_hash, peer_id):
         if(self.is_connected()):
             handshake = Handshake(info_hash, peer_id)
 
@@ -62,8 +62,9 @@ class Peer:
             raw_reply = await self.waitForHandshakeReply()
             decoded_reply = handshake.decode(raw_reply)
 
-            if(self.hashesMatch(decoded_reply, info_hash)):
-                return decoded_reply
+            if not self.hashesMatch(decoded_reply, info_hash):
+                self.close_tcp_connection()
+                raise ProtocolError("Unmatched Hashes!")
 
     async def getBitField(self):
         if(self.is_connected()):
