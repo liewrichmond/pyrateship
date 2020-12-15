@@ -5,6 +5,7 @@ import struct
 class ProtocolError(BaseException):
     pass
 
+#TODO: clean up Peer methods.. too much repitition
 class Peer:
     def __init__(self, address):
         self.ip = address[0]
@@ -41,7 +42,21 @@ class Peer:
     def hasPiece(self, piece_index):
         return self.available_pieces[piece_index]
 
-    async def read_from_buffer(self, expected_length):
+    def setAvailablePieces(self, bit_field):
+        if(self.available_pieces is None):
+            self.available_pieces = [0] * (len(bit_field)*8)
+            for i in range(0, len(bit_field)):
+                for j in range(0, 8):
+                    piece_index = (i*8) + j
+                    shift_amnt = 7 - j
+                    mask = 1 << shift_amnt
+                    bit_field_val = True if bit_field[i] & mask > 0 else False
+                    self.available_pieces[piece_index] = bit_field_val
+
+    def setAvailable(self, piece_index):
+        self.available_pieces[piece_index] = True
+
+    async def read(self, expected_length):
         if(self.is_connected()):
             reply = b''
             while len(reply) < expected_length:
@@ -49,19 +64,45 @@ class Peer:
                 reply += await self.reader.read(readsize)
             return reply
 
+    async def write(self, encoded_message):
+        if(self.is_connected()):
+            self.writer.write(encoded_message)
+            await self.writer.drain()
+
+    async def getMessageLength(self):
+        length_prefix_size = 4
+        length_prefix = await self.read(length_prefix_size)
+        return int.from_bytes(length_prefix, byteorder='big')
+
+    async def getMessage(self):
+        message_length = await self.getMessageLength()
+        raw_bytes = await self.read(message_length)
+        return Message.factory(raw_bytes)
+
+    def consume(self, message):
+        if type(message) is Choke:
+            print(message)
+            self.choking = True
+        elif type(message) is Unchoke:
+            self.choking = False
+        elif type(message) is Have:
+            self.setAvailable(message.piece_index)
+        elif type(message) is BitField:
+            self.setAvailablePieces(message.bit_field)
+
     async def create_tcp_connection(self):
         fut = asyncio.open_connection(self.ip, self.port)
         try:
             self.reader, self.writer = await asyncio.wait_for(fut, timeout=5)
-            print("TCP Connected Created... ")
         except asyncio.TimeoutError:
-            print("Connection Timed Out!")
             raise ConnectionRefusedError("Connection Timed Out")
 
     async def close_tcp_connection(self):
         if self.writer is not None:
             self.writer.close()
             await self.writer.wait_closed()
+            self.reader = None
+            self.writer = None
 
     async def startHandshake(self, info_hash, peer_id):
         if(self.is_connected()):
@@ -86,32 +127,10 @@ class Peer:
             self.consume(message)
             return message.bit_field
 
-    def setAvailablePieces(self, bit_field):
-        if(self.available_pieces is None):
-            self.available_pieces = [0] * (len(bit_field)*8)
-            for i in range(0, len(bit_field)):
-                for j in range(0, 8):
-                    piece_index = (i*8) + j
-                    shift_amnt = 7 - j
-                    mask = 1 << shift_amnt
-                    bit_field_val = True if bit_field[i] & mask > 0 else False
-                    self.available_pieces[piece_index] = bit_field_val
-
-    def setAvailable(self, piece_index):
-        self.available_pieces[piece_index] = True
 
     async def sendInterested(self):
-        if(self.is_connected()):
-            interested_message = struct.pack(
-                '>IB',
-                1,
-                2
-            )
-            self.writer.write(interested_message)
-            await self.writer.drain()
-            self.interested = True
-        else:
-            raise ProtocolError("Not connected to peer!")
+        await self.write(Interested.encode())
+        self.interested = True
 
     async def isChoked(self):
         if(self.choking):
@@ -120,20 +139,19 @@ class Peer:
                 self.choking = False
         return self.choking
 
-    async def getMessage(self):
-        message_length = await self.getMessageLength()
-        raw_bytes = await self.read_from_buffer(message_length)
-        return Message.factory(raw_bytes)
-
-    async def getMessageLength(self):
-        length_prefix_size = 4
-        length_prefix = await self.read_from_buffer(length_prefix_size)
-        return int.from_bytes(length_prefix, byteorder='big')
+    async def unchoke(self):
+        if(self.choking):
+            message = await self.getMessage()
+            while type(message) is not Unchoke:
+                self.consume(message)
+                message = await self.getMessage()
+            self.consume(message)
+            return
+        else:
+            return
 
     async def sendHandshake(self, handshake):
-        if self.writer is not None:
-            self.writer.write(handshake.encode())
-            await self.writer.drain()
+        await self.write(handshake.encode())
 
     async def waitForHandshakeReply(self):
         reply = b''
@@ -144,32 +162,17 @@ class Peer:
         if reply != b'' and reply is not None:
             return reply
         else:
-            raise ConnectionRefusedError("Could Not Complete Handshake")
-
-    def consume(self, message):
-        if type(message) is Choke:
-            self.choking = True
-        elif type(message) is Unchoke:
-            self.choking = False
-        elif type(message) is Have:
-            self.setAvailable(message.piece_index)
-        elif type(message) is BitField:
-            self.setAvailablePieces(message.bit_field)
+            raise ConnectionRefusedError("Could not Complete Handshake")
 
     async def requestPiece(self, message):
-        if(self.is_connected()):
-            self.writer.write(message.encode())
-            await self.writer.drain()
-
+        await self.write(message.encode())
+        message = await self.getMessage()
+        while type(message) is not Piece:
+            self.consume(message)
             message = await self.getMessage()
+        return message
 
-            while type(message) is not Piece:
-                self.consume(message)
-                message = await self.getMessage()
-
-            return message
-
-
+#TODO: Extract into a messages file
 class Message:
     Choke = 0
     Unchoke = 1
@@ -187,7 +190,8 @@ class Message:
     @classmethod
     def factory(self, raw_bytes):
         if(len(raw_bytes) == 0):
-            raise ValueError("Empty message!")
+            return
+            #raise ValueError("Empty message!")
         message_type = raw_bytes[0]
         if(self.hasPayload(message_type)):
             message_payload = raw_bytes[1:]
@@ -250,6 +254,14 @@ class Unchoke(Message):
 class Choke(Message):
     def __str__(self):
         return "Choke"
+
+class Interested(Message):
+    @classmethod
+    def encode(self):
+       return struct.pack('>IB',1,2)
+
+    def __str__(self):
+        return "Interested"
 
 class Have(Message):
     def __init__(self, message_payload):

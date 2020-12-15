@@ -70,13 +70,19 @@ class Downloader:
 
     async def requestPiece(self, peer, piece_index):
         self.working.add(piece_index)
+        #create a byte buffer?
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
-            block_size = self.torrentFile.getBlockSize(piece_index, block_index)
-            block_offset= block_index * self.torrentFile.DefaultBlockSize
-            request_message = Request(piece_index, block_offset, block_size)
-            response = await peer.requestPiece(request_message)
-            #give response to some file writer
-            print(response.piece_index, response.offset)
+            try:
+                await asyncio.wait_for(peer.unchoke(), timeout=10)
+                block_size = self.torrentFile.getBlockSize(piece_index, block_index)
+                block_offset= block_index * self.torrentFile.DefaultBlockSize
+                request_message = Request(piece_index, block_offset, block_size)
+                response = await peer.requestPiece(request_message)
+                print(response.piece_index, response.offset)
+            except asyncio.TimeoutError:
+                raise ConnectionError("Unchoke took too long ")
+                break
+        #give response to some file writer after checking hash
         self.working.remove(piece_index)
         self.connected_peers.add(peer)
 
@@ -86,6 +92,7 @@ class Downloader:
         while not self.downloadComplete():
             peer = self.connected_peers.pop()
             pieceIndex = self.downloadQueue.get()
+            #check if peer has piece
             asyncio.create_task(self.requestPiece(peer, pieceIndex))
             await asyncio.sleep(5)
 
