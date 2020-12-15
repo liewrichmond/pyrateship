@@ -16,64 +16,7 @@ class Client:
         downloader = Downloader(self.torrentFile)
         await downloader.download()
 
-    async def startRequests(self, connected_peers):
-        for peer in connected_peers:
-            peer_is_choked = await peer.isChoked()
-            if not peer_is_choked:
-                piece_index = 0
-                if peer.hasPiece(piece_index):
-                    await self.requestPiece(piece_index, peer)
-                    await peer.getMessage()
-                else:
-                    pass
-            else:
-                #If peer is choked, don't bother asking for a piece; just move on
-                pass
-
-    async def requestPiece(self, piece_index, peer):
-        for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
-            block_size = self.torrentFile.getBlockSize(piece_index, block_index)
-            block_offset= block_index * self.torrentFile.DefaultBlockSize
-            request = Request(piece_index, block_offset, block_size)
-            await self.send_message(peer, request)
-
-    async def send_message(self, peer, request):
-        if(peer.is_connected()):
-            peer.writer.write(request.encode())
-            await peer.writer.drain()
-        else:
-            raise ValueError("Peer isn't connected")
-
-    async def connectToPeers(self, availablePeers):
-        if len(availablePeers) > 0:
-            connectedPeers = []
-            for p in availablePeers:
-                peer = Peer(p)
-                try:
-                    await self.create_torrent_connection(peer)
-                    connectedPeers.append(peer)
-                    if(len(connectedPeers) == 4) :
-                        break
-                except ConnectionRefusedError:
-                    print("closing connection...")
-                    await peer.close_tcp_connection()
-                    pass
-            return connectedPeers
-
-    async def expressInterest(self, connectedPeers):
-        for peer in connectedPeers:
-            await peer.expressInterest()
-
-    async def create_torrent_connection(self, peer):
-        try:
-            await peer.create_tcp_connection()
-            await peer.initiateHandshake(self.torrentFile.info_hash, self.peer_id)
-            self.checkBitField(await peer.getBitField())
-        except ConnectionRefusedError:
-            raise ConnectionRefusedError("Connection Refused")
-
 class Downloader:
-
     @classmethod
     def getNewPeerId(self):
         prefix = "-TR3000-"
@@ -83,13 +26,13 @@ class Downloader:
     def __init__(self, torrentFile):
         self.torrentFile = torrentFile
         self.downloadQueue = self.generateDownloadQueue()
-        self.workingQueue = queue.Queue()
+        self.working = set()
         self.available_peer_addresses = self.getAvailablePeers()
         self.connected_peers = set()
         self.peer_id = self.getNewPeerId()
 
     def downloadComplete(self):
-        if(self.downloadQueue.empty() and self.workingQueue.empty()):
+        if(self.downloadQueue.empty() and len(self.working) == 0):
             return True
         else:
             return False
@@ -119,19 +62,23 @@ class Downloader:
                 await peer.create_tcp_connection()
                 await peer.startHandshake(self.torrentFile.info_hash, self.peer_id)
                 if self.isValidBitField(await peer.getBitField()):
-                    await peer.expressInterest()
+                    await peer.sendInterested()
                     self.connected_peers.add(peer)
             except ConnectionRefusedError:
                 await peer.close_tcp_connection()
                 pass
 
-    async def makeRequest(self, peer, piece_index):
-        self.workingQueue.put(pieceIndex)
+    async def requestPiece(self, peer, piece_index):
+        self.working.add(piece_index)
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
             block_size = self.torrentFile.getBlockSize(piece_index, block_index)
             block_offset= block_index * self.torrentFile.DefaultBlockSize
-            request = Request(piece_index, block_offset, block_size)
-            await peer.write(request.encode())
+            request_message = Request(piece_index, block_offset, block_size)
+            response = await peer.requestPiece(request_message)
+            #give response to some file writer
+            print(response.piece_index, response.offset)
+        self.working.remove(piece_index)
+        self.connected_peers.add(peer)
 
     async def download(self):
         asyncio.create_task(self.connectToPeers())
@@ -139,7 +86,7 @@ class Downloader:
         while not self.downloadComplete():
             peer = self.connected_peers.pop()
             pieceIndex = self.downloadQueue.get()
-            asyncio.create_task(self.makeRequest(peer, pieceIndex))
+            asyncio.create_task(self.requestPiece(peer, pieceIndex))
             await asyncio.sleep(5)
 
 if __name__ == "__main__":

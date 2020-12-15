@@ -29,6 +29,15 @@ class Peer:
         else:
             return True
 
+    def hashesMatch(self, decoded_reply, expectedHash):
+        try:
+            if(decoded_reply['info_hash'] == expectedHash):
+                return True
+            else:
+                return False
+        except KeyError:
+            raise ValueError("Reply is missing the info_hash key")
+
     def hasPiece(self, piece_index):
         return self.available_pieces[piece_index]
 
@@ -58,7 +67,7 @@ class Peer:
         if(self.is_connected()):
             handshake = Handshake(info_hash, peer_id)
 
-            await self.sendInitialHandshake(handshake)
+            await self.sendHandshake(handshake)
             raw_reply = await self.waitForHandshakeReply()
             decoded_reply = handshake.decode(raw_reply)
 
@@ -69,9 +78,13 @@ class Peer:
     async def getBitField(self):
         if(self.is_connected()):
             message = await self.getMessage()
-            if(type(message) is BitField):
-                self.setAvailablePieces(message.bit_field)
-                return message.bit_field
+
+            while type(message) is not BitField:
+                self.consume(message)
+                message = await self.getMessage()
+
+            self.consume(message)
+            return message.bit_field
 
     def setAvailablePieces(self, bit_field):
         if(self.available_pieces is None):
@@ -84,7 +97,10 @@ class Peer:
                     bit_field_val = True if bit_field[i] & mask > 0 else False
                     self.available_pieces[piece_index] = bit_field_val
 
-    async def expressInterest(self):
+    def setAvailable(self, piece_index):
+        self.available_pieces[piece_index] = True
+
+    async def sendInterested(self):
         if(self.is_connected()):
             interested_message = struct.pack(
                 '>IB',
@@ -94,9 +110,8 @@ class Peer:
             self.writer.write(interested_message)
             await self.writer.drain()
             self.interested = True
-
         else:
-            raise ProtocolError("nah")
+            raise ProtocolError("Not connected to peer!")
 
     async def isChoked(self):
         if(self.choking):
@@ -115,7 +130,7 @@ class Peer:
         length_prefix = await self.read_from_buffer(length_prefix_size)
         return int.from_bytes(length_prefix, byteorder='big')
 
-    async def sendInitialHandshake(self, handshake):
+    async def sendHandshake(self, handshake):
         if self.writer is not None:
             self.writer.write(handshake.encode())
             await self.writer.drain()
@@ -131,14 +146,28 @@ class Peer:
         else:
             raise ConnectionRefusedError("Could Not Complete Handshake")
 
-    def hashesMatch(self, decoded_reply, expectedHash):
-        try:
-            if(decoded_reply['info_hash'] == expectedHash):
-                return True
-            else:
-                return False
-        except KeyError:
-            raise ValueError("Reply is missing the info_hash key")
+    def consume(self, message):
+        if type(message) is Choke:
+            self.choking = True
+        elif type(message) is Unchoke:
+            self.choking = False
+        elif type(message) is Have:
+            self.setAvailable(message.piece_index)
+        elif type(message) is BitField:
+            self.setAvailablePieces(message.bit_field)
+
+    async def requestPiece(self, message):
+        if(self.is_connected()):
+            self.writer.write(message.encode())
+            await self.writer.drain()
+
+            message = await self.getMessage()
+
+            while type(message) is not Piece:
+                self.consume(message)
+                message = await self.getMessage()
+
+            return message
 
 
 class Message:
@@ -217,6 +246,20 @@ class Request(Message):
 class Unchoke(Message):
     def __str__(self):
         return "Unchoke"
+
+class Choke(Message):
+    def __str__(self):
+        return "Choke"
+
+class Have(Message):
+    def __init__(self, message_payload):
+        self.piece_index = struct.unpack(">I",message_payload)[0]
+
+class Piece(Message):
+    def __init__(self, message_payload):
+        self.piece_index = struct.unpack(">I",message_payload[0:4])[0]
+        self.offset = struct.unpack(">I",message_payload[4:8])[0]
+        self.data = message_payload[8:]
 
 class Handshake:
     MESSAGE_LENGTH = 68
