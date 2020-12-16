@@ -37,6 +37,17 @@ class Downloader:
         else:
             return False
 
+    def isValidBitField(self, bit_field):
+        if(len(bit_field)*8 == self.torrentFile.nPieces or
+           (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
+            return True
+        else:
+            return False
+
+    async def close(self, peer):
+        self.available_peer_addresses.add(peer.getAddress())
+        await peer.close_tcp_connection()
+
     def generateDownloadQueue(self):
         download_queue = queue.Queue()
         for i in range(0, self.torrentFile.nPieces):
@@ -46,13 +57,6 @@ class Downloader:
     def getAvailablePeers(self):
         tracker = Tracker(self.torrentFile, self.getNewPeerId())
         return tracker.getAvailablePeers()
-
-    def isValidBitField(self, bit_field):
-        if(len(bit_field)*8 == self.torrentFile.nPieces or
-           (len(bit_field)*(8)) - 4 == self.torrentFile.nPieces):
-            return True
-        else:
-            return False
 
     async def connectToPeers(self):
         while len(self.available_peer_addresses) != 0:
@@ -64,8 +68,8 @@ class Downloader:
                 if self.isValidBitField(await peer.getBitField()):
                     await peer.sendInterested()
                     self.connected_peers.add(peer)
-            except ConnectionRefusedError:
-                await peer.close_tcp_connection()
+            except ConnectionError:
+                await self.close(peer)
                 pass
 
     async def requestPiece(self, peer, piece_index):
@@ -73,16 +77,19 @@ class Downloader:
         #create a byte buffer?
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
             try:
-                await asyncio.wait_for(peer.unchoke(), timeout=10)
+                await asyncio.wait_for(peer.unchoke(), timeout=5)
                 block_size = self.torrentFile.getBlockSize(piece_index, block_index)
                 block_offset= block_index * self.torrentFile.DefaultBlockSize
                 request_message = Request(piece_index, block_offset, block_size)
                 response = await peer.requestPiece(request_message)
-                print(response.piece_index, response.offset)
-            except asyncio.TimeoutError:
-                raise ConnectionError("Unchoke took too long ")
-                break
+            except (asyncio.TimeoutError, ConnectionError):
+                await self.close(peer)
+                self.downloadQueue.put(piece_index)
+                #put peer address back on queue
+                print("Dropped peer")
+                return
         #give response to some file writer after checking hash
+        print(piece_index, "done")
         self.working.remove(piece_index)
         self.connected_peers.add(peer)
 
@@ -92,9 +99,11 @@ class Downloader:
         while not self.downloadComplete():
             peer = self.connected_peers.pop()
             pieceIndex = self.downloadQueue.get()
-            #check if peer has piece
-            asyncio.create_task(self.requestPiece(peer, pieceIndex))
-            await asyncio.sleep(5)
+            if(peer.hasPiece(pieceIndex)):
+                asyncio.create_task(self.requestPiece(peer, pieceIndex))
+            else:
+                self.connected_peers.add(peer)
+            await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
     client = Client()

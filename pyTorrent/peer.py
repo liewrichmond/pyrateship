@@ -42,6 +42,9 @@ class Peer:
     def hasPiece(self, piece_index):
         return self.available_pieces[piece_index]
 
+    def getAddress(self):
+        return (self.ip, self.port)
+
     def setAvailablePieces(self, bit_field):
         if(self.available_pieces is None):
             self.available_pieces = [0] * (len(bit_field)*8)
@@ -59,10 +62,20 @@ class Peer:
     async def read(self, expected_length):
         if(self.is_connected()):
             reply = b''
-            while len(reply) < expected_length:
-                readsize = expected_length- len(reply)
-                reply += await self.reader.read(readsize)
-            return reply
+            tries = 0
+            while len(reply) < expected_length and tries < 10:
+                read_size = expected_length - len(reply)
+                from_buffer = await self.reader.read(read_size)
+                if from_buffer == b'':
+                    tries += 1
+                    await asyncio.sleep(0.1)
+                else:
+                    reply += from_buffer
+
+            if(reply == b''):
+                raise ConnectionError("Read EOF... Connection probably reset...")
+            else:
+                return reply
 
     async def write(self, encoded_message):
         if(self.is_connected()):
@@ -93,9 +106,9 @@ class Peer:
     async def create_tcp_connection(self):
         fut = asyncio.open_connection(self.ip, self.port)
         try:
-            self.reader, self.writer = await asyncio.wait_for(fut, timeout=5)
+            self.reader, self.writer = await asyncio.wait_for(fut, timeout=1)
         except asyncio.TimeoutError:
-            raise ConnectionRefusedError("Connection Timed Out")
+            raise ConnectionError("Connection Timed Out")
 
     async def close_tcp_connection(self):
         if self.writer is not None:
@@ -109,7 +122,7 @@ class Peer:
             handshake = Handshake(info_hash, peer_id)
 
             await self.sendHandshake(handshake)
-            raw_reply = await self.waitForHandshakeReply()
+            raw_reply = await self.getHandshakeReply()
             decoded_reply = handshake.decode(raw_reply)
 
             if not self.hashesMatch(decoded_reply, info_hash):
@@ -117,27 +130,16 @@ class Peer:
                 raise ProtocolError("Unmatched Hashes!")
 
     async def getBitField(self):
-        if(self.is_connected()):
-            message = await self.getMessage()
-
-            while type(message) is not BitField:
-                self.consume(message)
-                message = await self.getMessage()
-
+        message = await self.getMessage()
+        while type(message) is not BitField:
             self.consume(message)
-            return message.bit_field
-
+            message = await self.getMessage()
+        self.consume(message)
+        return message.bit_field
 
     async def sendInterested(self):
         await self.write(Interested.encode())
         self.interested = True
-
-    async def isChoked(self):
-        if(self.choking):
-            message = await self.getMessage()
-            if(type(message) == Unchoke):
-                self.choking = False
-        return self.choking
 
     async def unchoke(self):
         if(self.choking):
@@ -153,16 +155,12 @@ class Peer:
     async def sendHandshake(self, handshake):
         await self.write(handshake.encode())
 
-    async def waitForHandshakeReply(self):
-        reply = b''
-        tries = 1
-        while tries < 10 and len(reply) < Handshake.MESSAGE_LENGTH:
-            reply = await self.reader.read(Handshake.MESSAGE_LENGTH)
-            tries+=1
-        if reply != b'' and reply is not None:
+    async def getHandshakeReply(self):
+        try:
+            reply = await self.read(Handshake.MESSAGE_LENGTH)
             return reply
-        else:
-            raise ConnectionRefusedError("Could not Complete Handshake")
+        except ConnectionError:
+            raise ConnectionError("Handhsake Refused")
 
     async def requestPiece(self, message):
         await self.write(message.encode())
