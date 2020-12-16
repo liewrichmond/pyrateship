@@ -15,4 +15,5 @@ class TorrentFileTest(unittest.TestCase):
         self.assertEqual(torrentFile.getNBlocks(515), 3)
         self.assertEqual(torrentFile.getBlockSize(50, 10), pow(2,14))
         self.assertEqual(torrentFile.getBlockSize(515, 2), 9646)
+        self.assertEqual(torrentFile.getPieceHash(0), True)
 

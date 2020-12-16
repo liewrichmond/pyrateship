@@ -2,6 +2,7 @@ import os
 import socket
 import asyncio
 import queue
+import hashlib
 from torrentFile import TorrentFile
 from tracker import Tracker
 from peer import Peer, Request
@@ -44,6 +45,14 @@ class Downloader:
         else:
             return False
 
+    def isValidData(self, piece_index, data):
+        expected_hash = self.torrentFile.getPieceHash(piece_index)
+        data_hash = hashlib.sha1(data).digest()
+        if(expected_hash != data_hash):
+            return False
+        else:
+            return True
+
     async def close(self, peer):
         self.available_peer_addresses.add(peer.getAddress())
         await peer.close_tcp_connection()
@@ -74,7 +83,7 @@ class Downloader:
 
     async def requestPiece(self, peer, piece_index):
         self.working.add(piece_index)
-        #create a byte buffer?
+        block_data = b''
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
             try:
                 await asyncio.wait_for(peer.unchoke(), timeout=5)
@@ -82,16 +91,19 @@ class Downloader:
                 block_offset= block_index * self.torrentFile.DefaultBlockSize
                 request_message = Request(piece_index, block_offset, block_size)
                 response = await peer.requestPiece(request_message)
+                block_data += response.data
             except (asyncio.TimeoutError, ConnectionError):
                 await self.close(peer)
                 self.downloadQueue.put(piece_index)
-                #put peer address back on queue
                 print("Dropped peer")
                 return
+        if(self.isValidData(piece_index, block_data)):
+            print(piece_index, "done")
+            self.working.remove(piece_index)
+            self.connected_peers.add(peer)
         #give response to some file writer after checking hash
-        print(piece_index, "done")
-        self.working.remove(piece_index)
-        self.connected_peers.add(peer)
+        else:
+            print("Incorrect Data!")
 
     async def download(self):
         asyncio.create_task(self.connectToPeers())
