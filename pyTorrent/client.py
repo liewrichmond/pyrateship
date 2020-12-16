@@ -67,6 +67,11 @@ class Downloader:
         tracker = Tracker(self.torrentFile, self.getNewPeerId())
         return tracker.getAvailablePeers()
 
+    async def getPeer(self):
+        while len(self.connected_peers) <= 0:
+            await asyncio.sleep(0.5)
+        return self.connected_peers.pop()
+
     async def connectToPeers(self):
         while len(self.available_peer_addresses) != 0:
             peer_address = self.available_peer_addresses.pop()
@@ -109,7 +114,8 @@ class Downloader:
         asyncio.create_task(self.connectToPeers())
         await asyncio.sleep(15)
         while not self.downloadComplete():
-            peer = self.connected_peers.pop()
+            #peer = self.connected_peers.pop()
+            peer = await self.getPeer()
             pieceIndex = self.downloadQueue.get()
             if(peer.hasPiece(pieceIndex)):
                 asyncio.create_task(self.requestPiece(peer, pieceIndex))

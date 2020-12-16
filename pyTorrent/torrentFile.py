@@ -30,7 +30,7 @@ class TorrentFile:
             return False
 
     def getFinalPieceLength(self):
-        return ((self.file_length/self.piece_length - self.file_length//self.piece_length) * self.piece_length)
+        return int((self.file_length/self.piece_length - self.file_length//self.piece_length) * self.piece_length)
 
     #create defaultblocksize const macro
     def getNBlocksFinalPiece(self):
@@ -51,10 +51,9 @@ class TorrentFile:
             return self.piece_length//pow(2,14)
 
     def getBlockSize(self, piece_index, block_index):
-        if(self.isFinalPiece(piece_index)):
-            if self.isFinalBlock(piece_index, block_index):
-                final_piece_length = self.getFinalPieceLength()
-                n_blocks = self.getNBlocksFinalPiece()
-                return ((final_piece_length / pow(2,14) - final_piece_length // pow(2,14)) * pow(2,14))
+        if(self.isFinalPiece(piece_index) and self.isFinalBlock(piece_index, block_index)):
+            final_piece_length = self.getFinalPieceLength()
+            n_blocks = self.getNBlocksFinalPiece()
+            return int((final_piece_length / pow(2,14) - final_piece_length // pow(2,14)) * pow(2,14))
         else:
             return pow(2,14)
