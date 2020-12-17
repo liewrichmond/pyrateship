@@ -121,7 +121,8 @@ class Downloader:
                 asyncio.create_task(self.requestPiece(peer, pieceIndex))
             else:
                 self.connected_peers.add(peer)
-            await asyncio.sleep(0.5)
+            #await asyncio.sleep(0.5)
+        print("done hoe")
 
 if __name__ == "__main__":
     client = Client()
