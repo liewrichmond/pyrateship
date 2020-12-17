@@ -3,9 +3,9 @@ import socket
 import asyncio
 import queue
 import hashlib
-from torrentFile import TorrentFile
-from tracker import Tracker
-from peer import Peer, Request
+from pyTorrent.torrentFile import TorrentFile
+from pyTorrent.tracker import Tracker
+from pyTorrent.peer import Peer, Request
 
 class Client:
     def __init__(self):
@@ -114,14 +114,12 @@ class Downloader:
         asyncio.create_task(self.connectToPeers())
         await asyncio.sleep(15)
         while not self.downloadComplete():
-            #peer = self.connected_peers.pop()
             peer = await self.getPeer()
-            pieceIndex = self.downloadQueue.get()
+            pieceIndex = self.downloadQueue.get(timeout = 5)
             if(peer.hasPiece(pieceIndex)):
                 asyncio.create_task(self.requestPiece(peer, pieceIndex))
             else:
                 self.connected_peers.add(peer)
-            #await asyncio.sleep(0.5)
         print("done hoe")
 
 if __name__ == "__main__":
