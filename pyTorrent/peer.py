@@ -60,6 +60,9 @@ class Peer:
         self.available_pieces[piece_index] = True
 
     async def read(self, expected_length):
+        """
+        Wrapper function for the asyncio.StreamReader. Used to handle connection errors with peers.
+        """
         if(self.is_connected()):
             reply = b''
             tries = 0
@@ -83,16 +86,25 @@ class Peer:
             await self.writer.drain()
 
     async def getMessageLength(self):
+        """
+        Message length prefixes are always fixed length 4-byte ints. Helper function to get messages from the read buffer.
+        """
         length_prefix_size = 4
         length_prefix = await self.read(length_prefix_size)
         return int.from_bytes(length_prefix, byteorder='big')
 
     async def getMessage(self):
+        """
+        Returns a parsed Message object.
+        """
         message_length = await self.getMessageLength()
         raw_bytes = await self.read(message_length)
         return Message.factory(raw_bytes)
 
     def consume(self, message):
+        """
+        Processes the needed function based on the message type.
+        """
         if type(message) is Choke:
             print(message)
             self.choking = True
@@ -121,7 +133,7 @@ class Peer:
         if(self.is_connected()):
             handshake = Handshake(info_hash, peer_id)
 
-            await self.sendHandshake(handshake)
+            await self.write(handshake.encode())
             raw_reply = await self.getHandshakeReply()
             decoded_reply = handshake.decode(raw_reply)
 
@@ -151,9 +163,6 @@ class Peer:
             return
         else:
             return
-
-    async def sendHandshake(self, handshake):
-        await self.write(handshake.encode())
 
     async def getHandshakeReply(self):
         try:

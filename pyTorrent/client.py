@@ -3,9 +3,9 @@ import socket
 import asyncio
 import queue
 import hashlib
-from pyTorrent.torrentFile import TorrentFile
-from pyTorrent.tracker import Tracker
-from pyTorrent.peer import Peer, Request
+from torrentFile import TorrentFile
+from tracker import Tracker
+from peer import Peer, Request
 
 class Client:
     def __init__(self):
@@ -31,9 +31,10 @@ class Downloader:
         self.available_peer_addresses = self.getAvailablePeers()
         self.connected_peers = set()
         self.peer_id = self.getNewPeerId()
+        self.fd = os.open(self.torrentFile.file_name,  os.O_RDWR | os.O_CREAT)
 
     def downloadComplete(self):
-        if(self.downloadQueue.empty() and len(self.working) == 0):
+        if(self.downloadQueue.empty()):
             return True
         else:
             return False
@@ -57,7 +58,15 @@ class Downloader:
         self.available_peer_addresses.add(peer.getAddress())
         await peer.close_tcp_connection()
 
+    def write(self, piece_index, data):
+        pos = piece_index * self.torrentFile.piece_length
+        os.lseek(self.fd, pos, os.SEEK_SET)
+        os.write(self.fd, data)
+
     def generateDownloadQueue(self):
+        """
+        Generates a Queue object that contains the indexes for pieces to be downloaded
+        """
         download_queue = queue.Queue()
         for i in range(0, self.torrentFile.nPieces):
             download_queue.put(i)
@@ -68,11 +77,19 @@ class Downloader:
         return tracker.getAvailablePeers()
 
     async def getPeer(self):
+        """
+        Helper function to get a peer from the stack. This is done to prevent popping from an empty stack without catching the exception.
+        """
         while len(self.connected_peers) <= 0:
             await asyncio.sleep(0.5)
         return self.connected_peers.pop()
 
     async def connectToPeers(self):
+        """
+        Mutates connected_peers directly.
+        Creating a Peer Connection consists of a TCP connection, a handshake, and a Bitfield.
+        This functions also sends and interested message to get the peer ready to receive messages.
+        """
         while len(self.available_peer_addresses) != 0:
             peer_address = self.available_peer_addresses.pop()
             peer = Peer(peer_address)
@@ -87,6 +104,9 @@ class Downloader:
                 pass
 
     async def requestPiece(self, peer, piece_index):
+        """
+        Requests a Piece from a given peer.
+        """
         self.working.add(piece_index)
         block_data = b''
         for block_index in range(0, self.torrentFile.getNBlocks(piece_index)):
@@ -106,6 +126,7 @@ class Downloader:
             print(piece_index, "done")
             self.working.remove(piece_index)
             self.connected_peers.add(peer)
+            self.write(piece_index, block_data)
         #give response to some file writer after checking hash
         else:
             print("Incorrect Data!")
@@ -117,11 +138,10 @@ class Downloader:
             peer = await self.getPeer()
             pieceIndex = self.downloadQueue.get(timeout = 5)
             if(peer.hasPiece(pieceIndex)):
-                asyncio.create_task(self.requestPiece(peer, pieceIndex))
+                task = asyncio.create_task(self.requestPiece(peer, pieceIndex))
             else:
                 self.connected_peers.add(peer)
-        print("done hoe")
 
 if __name__ == "__main__":
     client = Client()
-    asyncio.run(client.download('../resources/fanimatrix.torrent'))
+    asyncio.run(client.download('../resources/big-buck-bunny.torrent'))

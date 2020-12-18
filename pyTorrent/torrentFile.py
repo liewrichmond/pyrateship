@@ -11,6 +11,7 @@ class TorrentFile:
         self.announce_url = decodedTorrentFile[b'announce'].decode()
         self.file_length = decodedTorrentFile[b'info'][b'length']
         self.pieces = decodedTorrentFile[b'info'][b'pieces']
+        self.file_name = decodedTorrentFile[b'info'][b'name'].decode('utf-8')
         self.piece_length = decodedTorrentFile[b'info'][b'piece length']
         self.nPieces = len(self.pieces)//20
 

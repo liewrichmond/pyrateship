@@ -8,6 +8,7 @@ class TorrentFileTest(unittest.TestCase):
 
     def testIsLastPiece(self):
         torrentFile = TorrentFile('../resources/fanimatrix.torrent')
+        self.assertEqual(torrentFile.file_name, 'The-Fanimatrix-(DivX-5.1-HQ).avi')
         self.assertEqual(torrentFile.isFinalPiece(515), True)
         self.assertEqual(torrentFile.getFinalPieceLength(), 42414)
         self.assertEqual(torrentFile.getNBlocksFinalPiece(), 3)
@@ -15,5 +16,4 @@ class TorrentFileTest(unittest.TestCase):
         self.assertEqual(torrentFile.getNBlocks(515), 3)
         self.assertEqual(torrentFile.getBlockSize(50, 10), pow(2,14))
         self.assertEqual(torrentFile.getBlockSize(515, 2), 9646)
-        self.assertEqual(torrentFile.getPieceHash(0), True)
 
